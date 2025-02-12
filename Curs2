@@ -1,0 +1,22 @@
+Teoria Limbajului si modele lingvistice in LC
+
+1. Modele de gramatica formala - sunt modele matematice care descriu structura gramaticala a limbajului natural, ca exemple poate fi gramatica generativa lui Noam Chompsky si gramaticile formale precum gramaticele regulate, gramaticele context sensibile si gramaticele independente de context
+2. Automate finite si transductoare - acestea sunt modele abstracte care pot fi utilizate pentru a reprezenta si analiza structura secventelor de caractere cum ar fi cuvintele si propozitiile, transductoarele sunt o extensie a automatelor finite si sunt utilizate in diverse aplicatii de procesarea a limbajului natural (segmentarea de cuvinte si analiza morfologica)
+3. Metode statistice bazate pe statistici lingvistice si sunt folosite pentru extragerea de modele si relatii sunt utilizate in sistemele de traducere automata
+4. Modele de invatare automata - bazate pe algoritm de invatare automata care pot invata si adapta la datele lingvistice (retele neuronale) ce pot fi utilizate in analiza sentimentului si in recunoasterea vorbirii
+Principalele metode si tehnici utilizate in prelucrarea limbajului natural (NLP)
+
+PLN utilizeaza tehnici si metode din domeniul LC si inteligentei artificiale pentru a putea analiza si genera limbajul natural cat  mai precis si eficient
+1. Tokenizarea si segmentarea textului
+    Aceasta tehnica implica descompunerea unui text in entitati mai mici cum ar fi cuvintele si simbolurile
+    Tokenizarea poate fi efectuata prin separarea cuvintelor prin spatii sau prin alte metode, elementele segmentate mai mici a unui text se numesc tokenuri
+    Tokenizarea poate fi realizata prin mai multe metode
+        1. Separarea cuvintelor prin spatiu - cea mai simpla metoda dar poate intampina dificultati in tratarea simbolurilor de punctuatie sau in identificarea cuvintelor compuse
+        2. Utilizarea Expresiilor Regulate - sunt sabloane de text care permit identificarea si extragerea de siruri de caractere conform unor criterii specifice
+2. Procesul de impartire a unui text in unitati semantice mai mari decat cuvintele individuale cum ar fi propozitiile sau paragrafele
+    Poate fi realizata prin mai multe metode
+        1. indentificarea semnelor de punctuatie
+        2. utilizarea algoritmilor de segmentare - sunt algoritmi specifici care iau contextul lingvistici si sintactic
+
+Analiza morfologica
+implica indentificarea si analiza componentelor morfologica a cuvintelor- este utila pentru a determina formele canonice (de baza) a cuvintelor
