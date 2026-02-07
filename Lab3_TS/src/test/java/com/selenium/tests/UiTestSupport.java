@@ -54,16 +54,11 @@ final class UiTestSupport {
             "ins.adsbygoogle"
         );
 
-        StringBuilder script = new StringBuilder("const selectors = [");
-        for (int i = 0; i < selectors.size(); i++) {
-            if (i > 0) {
-                script.append(",");
-            }
-            script.append("'").append(selectors.get(i)).append("'");
-        }
-        script.append("]; selectors.forEach(sel => document.querySelectorAll(sel).forEach(el => el.remove()));");
-
-        ((JavascriptExecutor) driver).executeScript(script.toString());
+        ((JavascriptExecutor) driver).executeScript(
+            "const selectors = arguments[0];"
+                + "selectors.forEach(sel => document.querySelectorAll(sel).forEach(el => el.remove()));",
+            selectors
+        );
     }
 
     private static void waitForReadyState(WebDriver driver, WebDriverWait wait) {
