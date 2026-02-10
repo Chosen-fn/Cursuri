@@ -8,6 +8,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -21,7 +24,8 @@ import org.junit.runner.notification.Failure;
 import org.junit.runner.notification.RunListener;
 
 public class App {
-    private static final Path REPORT_PATH = Paths.get("target", "test-case-results.md");
+    private static final Path REPORT_PATH = Paths.get("results.md");
+    private static final Path LEGACY_REPORT_PATH = Paths.get("target", "test-case-results.md");
 
     public static void main(String[] args) {
         Class<?>[] testClasses = {
@@ -72,6 +76,7 @@ public class App {
         try {
             writeReport(testClasses, recorder);
             System.out.println("Report: " + REPORT_PATH.toAbsolutePath());
+            System.out.println("Report: " + LEGACY_REPORT_PATH.toAbsolutePath());
         } catch (IOException e) {
             System.out.println("Could not write report file: " + e.getMessage());
         }
@@ -82,39 +87,151 @@ public class App {
     }
 
     private static void writeReport(Class<?>[] testClasses, TestRunRecorder recorder) throws IOException {
-        Files.createDirectories(REPORT_PATH.getParent());
-
         List<TestCaseDefinition> tests = discoverTestCases(testClasses);
         Map<String, TestCaseSpec> specs = testSpecs();
+        String generatedAt = ZonedDateTime
+            .now(ZoneOffset.UTC)
+            .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss 'UTC'"));
 
-        StringBuilder md = new StringBuilder();
-        md.append("# Automated Test Case Results\n\n");
-        md.append("| Test case | Type | Expected | Actual |\n");
-        md.append("|---|---|---|---|\n");
+        int passed = 0;
+        int failed = 0;
+        int ignored = 0;
+        int notRun = 0;
+        long totalElapsedMs = 0L;
 
+        StringBuilder detailsRows = new StringBuilder();
         for (TestCaseDefinition test : tests) {
             String key = test.key();
-            TestCaseSpec spec = specs.getOrDefault(
-                key,
-                new TestCaseSpec(
-                    "Unspecified",
-                    "Test should complete without assertion or runtime errors.",
-                    "Observed run completed without assertion/runtime errors."
-                )
-            );
+            TestCaseSpec spec = specs.getOrDefault(key, defaultSpec(test));
             TestExecution execution = recorder.executions.getOrDefault(key, TestExecution.notRun());
-            md.append("| ")
+
+            switch (execution.status) {
+                case PASSED -> passed++;
+                case FAILED -> failed++;
+                case IGNORED -> ignored++;
+                case NOT_RUN -> notRun++;
+            }
+
+            if (execution.elapsedMs >= 0L) {
+                totalElapsedMs += execution.elapsedMs;
+            }
+
+            detailsRows.append("| ")
+                .append(escapeMd(spec.displayName))
+                .append(" | ")
                 .append(escapeMd(key))
+                .append(" | ")
+                .append(escapeMd(spec.area))
                 .append(" | ")
                 .append(escapeMd(spec.type))
                 .append(" | ")
                 .append(escapeMd(spec.expected))
                 .append(" | ")
                 .append(escapeMd(execution.toHumanReadable(spec.actualOnPass)))
+                .append(" | ")
+                .append(statusLabel(execution.status))
+                .append(" | ")
+                .append(formatDuration(execution.elapsedMs))
                 .append(" |\n");
         }
 
+        StringBuilder md = new StringBuilder();
+        md.append("# Automated Test Results\n\n");
+        md.append("- Generated: ").append(generatedAt).append('\n');
+        md.append("- Runner: `com.selenium.tests.App`\n");
+        md.append("- Output files: `results.md`, `target/test-case-results.md`\n\n");
+        md.append("## Summary\n\n");
+        md.append("| Metric | Value |\n");
+        md.append("|---|---:|\n");
+        md.append("| Total tests discovered | ").append(tests.size()).append(" |\n");
+        md.append("| Passed | ").append(passed).append(" |\n");
+        md.append("| Failed | ").append(failed).append(" |\n");
+        md.append("| Ignored | ").append(ignored).append(" |\n");
+        md.append("| Not run | ").append(notRun).append(" |\n");
+        md.append("| Total execution time | ").append(totalElapsedMs).append(" ms |\n\n");
+        md.append("## Detailed Results\n\n");
+        md.append(
+            "| Test Name | Technical ID | Area | Positive/Negative | Expected Behavior | Actual Behavior | Status | Duration |\n"
+        );
+        md.append("|---|---|---|---|---|---|---:|---:|\n");
+        md.append(detailsRows);
+
+        createParentDirectoryIfNeeded(REPORT_PATH);
+        createParentDirectoryIfNeeded(LEGACY_REPORT_PATH);
         Files.writeString(REPORT_PATH, md.toString(), StandardCharsets.UTF_8);
+        Files.writeString(LEGACY_REPORT_PATH, md.toString(), StandardCharsets.UTF_8);
+    }
+
+    private static void createParentDirectoryIfNeeded(Path path) throws IOException {
+        Path parent = path.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+    }
+
+    private static String statusLabel(Status status) {
+        return switch (status) {
+            case PASSED -> "PASS";
+            case FAILED -> "FAIL";
+            case IGNORED -> "IGNORED";
+            case NOT_RUN -> "NOT RUN";
+        };
+    }
+
+    private static String formatDuration(long elapsedMs) {
+        return elapsedMs >= 0L ? elapsedMs + " ms" : "-";
+    }
+
+    private static TestCaseSpec defaultSpec(TestCaseDefinition test) {
+        String className = test.clazz().getSimpleName().replaceFirst("Test$", "");
+        String methodName = test.methodName().replaceFirst("^(should|test)", "");
+        String scenario = humanizeIdentifier(methodName).trim();
+        if (!scenario.isEmpty()) {
+            scenario = Character.toUpperCase(scenario.charAt(0)) + scenario.substring(1);
+        } else {
+            scenario = "Unnamed scenario";
+        }
+
+        return new TestCaseSpec(
+            humanizeIdentifier(className) + " - " + scenario,
+            areaFromClassName(test.clazz().getSimpleName()),
+            "Unspecified",
+            "Test should complete without assertion or runtime errors.",
+            "Observed run completed without assertion/runtime errors."
+        );
+    }
+
+    private static String areaFromClassName(String className) {
+        if (className.startsWith("Ui")) {
+            return "UI";
+        }
+        if (className.startsWith("Api")) {
+            return "API";
+        }
+        if (className.startsWith("Security")) {
+            return "Security";
+        }
+        return "General";
+    }
+
+    private static String humanizeIdentifier(String value) {
+        return value
+            .replaceAll("([A-Z]+)([A-Z][a-z])", "$1 $2")
+            .replaceAll("([a-z\\d])([A-Z])", "$1 $2")
+            .replace('_', ' ')
+            .trim();
+    }
+
+    private static void addSpec(
+        Map<String, TestCaseSpec> specs,
+        String key,
+        String displayName,
+        String area,
+        String type,
+        String expected,
+        String actualOnPass
+    ) {
+        specs.put(key, new TestCaseSpec(displayName, area, type, expected, actualOnPass));
     }
 
     private static List<TestCaseDefinition> discoverTestCases(Class<?>[] testClasses) {
@@ -133,101 +250,113 @@ public class App {
     private static Map<String, TestCaseSpec> testSpecs() {
         Map<String, TestCaseSpec> specs = new LinkedHashMap<>();
 
-        specs.put(
+        addSpec(
+            specs,
             "ApiBookByIsbnTest#shouldReturnSpecificBookByIsbn",
-            new TestCaseSpec(
-                "Positive",
-                "Book endpoint should return 200 and either valid book data or an explicit no-data fallback.",
-                "Observed 200 response for specific ISBN request."
-            )
+            "API - Fetch Book By Fixed ISBN",
+            "API",
+            "Positive",
+            "Book endpoint should return 200 and either valid book data or an explicit no-data fallback.",
+            "Observed 200 response for specific ISBN request."
         );
-        specs.put(
+        addSpec(
+            specs,
             "ApiBooksListTest#shouldReturnBooksListFromApi",
-            new TestCaseSpec(
-                "Positive",
-                "Books endpoint should return 200 and include books/ISBN data.",
-                "Observed 200 response with books and ISBN fields."
-            )
+            "API - Fetch Books List",
+            "API",
+            "Positive",
+            "Books endpoint should return 200 and include books/ISBN data.",
+            "Observed 200 response with books and ISBN fields."
         );
-        specs.put(
+        addSpec(
+            specs,
             "ApiResolveIsbnAndFetchBookTest#shouldResolveIsbnFromListAndFetchBook",
-            new TestCaseSpec(
-                "Positive",
-                "First ISBN from books list should resolve to a 200 response for book details.",
-                "Observed list fetch succeeded and resolved ISBN fetch returned 200."
-            )
+            "API - Resolve ISBN From List And Fetch Details",
+            "API",
+            "Positive",
+            "First ISBN from books list should resolve to a 200 response for book details.",
+            "Observed list fetch succeeded and resolved ISBN fetch returned 200."
         );
-        specs.put(
+        addSpec(
+            specs,
             "SecuritySearchBoxXssTest#shouldNotExecuteXssInSearchBox",
-            new TestCaseSpec(
-                "Negative",
-                "Injected script must not execute (no alert), and results should not expose matching book rows.",
-                "Observed no alert after XSS payload and no matching book rows displayed."
-            )
+            "Security - Reject XSS Payload In Search Box",
+            "Security",
+            "Negative",
+            "Injected script must not execute (no alert), and results should not expose matching book rows.",
+            "Observed no alert after XSS payload and no matching book rows displayed."
         );
-        specs.put(
+        addSpec(
+            specs,
             "SecuritySslCertificateTest#shouldHaveValidSslCertificate",
-            new TestCaseSpec(
-                "Positive",
-                "HTTPS endpoint should return 200 with at least one server certificate.",
-                "Observed HTTPS 200 response with non-empty server certificate chain."
-            )
+            "Security - Validate SSL Certificate",
+            "Security",
+            "Positive",
+            "HTTPS endpoint should return 200 with at least one server certificate.",
+            "Observed HTTPS 200 response with non-empty server certificate chain."
         );
-        specs.put(
+        addSpec(
+            specs,
             "UiAddToCollectionAuthTest#shouldRequireLoginToAddToCollection",
-            new TestCaseSpec(
-                "Negative",
-                "Unauthenticated add-to-collection should be blocked (alert/redirect) or handled by no-data fallback.",
-                "Observed unauthorized flow was blocked as expected."
-            )
+            "UI - Block Add To Collection When Logged Out",
+            "UI",
+            "Negative",
+            "Unauthenticated add-to-collection should be blocked (alert/redirect) or handled by no-data fallback.",
+            "Observed unauthorized flow was blocked as expected."
         );
-        specs.put(
+        addSpec(
+            specs,
             "UiBaseElementsTest#shouldDisplayBaseElementsOnHomePage",
-            new TestCaseSpec(
-                "Positive",
-                "Book store home page should show search box, login button, table, and Book Store content.",
-                "Observed core home page controls and Book Store content."
-            )
+            "UI - Display Base Elements On Home Page",
+            "UI",
+            "Positive",
+            "Book store home page should show search box, login button, table, and Book Store content.",
+            "Observed core home page controls and Book Store content."
         );
-        specs.put(
+        addSpec(
+            specs,
             "UiBookSearchFilterTest#shouldFilterBooksBySearch",
-            new TestCaseSpec(
-                "Positive",
-                "Searching for 'Git Pocket Guide' should leave exactly one row with that title.",
-                "Observed search reduced table to one row titled 'Git Pocket Guide'."
-            )
+            "UI - Filter Book List By Search Term",
+            "UI",
+            "Positive",
+            "Searching for 'Git Pocket Guide' should leave exactly one row with that title.",
+            "Observed search reduced table to one row titled 'Git Pocket Guide'."
         );
-        specs.put(
+        addSpec(
+            specs,
             "UiBookTitleSortingTest#shouldSortBooksByTitle",
-            new TestCaseSpec(
-                "Positive",
-                "Title sort interaction should keep at least two valid book rows visible.",
-                "Observed title sort click succeeded and book rows remained visible."
-            )
+            "UI - Sort Books By Title",
+            "UI",
+            "Positive",
+            "Title sort interaction should keep at least two valid book rows visible.",
+            "Observed title sort click succeeded and book rows remained visible."
         );
-        specs.put(
+        addSpec(
+            specs,
             "UiLoginNavigationTest#shouldNavigateToLoginForm",
-            new TestCaseSpec(
-                "Positive",
-                "Login button should navigate to /login and show username/password fields.",
-                "Observed navigation to /login with username and password fields visible."
-            )
+            "UI - Navigate To Login Form",
+            "UI",
+            "Positive",
+            "Login button should navigate to /login and show username/password fields.",
+            "Observed navigation to /login with username and password fields visible."
         );
-        specs.put(
+        addSpec(
+            specs,
             "UiOpenBookDetailsTest#shouldOpenBookDetailsFromList",
-            new TestCaseSpec(
-                "Positive",
-                "Opening a book should show details and return to store, or report a no-data fallback.",
-                "Observed book details flow completed or no-data fallback was triggered."
-            )
+            "UI - Open Book Details From List",
+            "UI",
+            "Positive",
+            "Opening a book should show details and return to store, or report a no-data fallback.",
+            "Observed book details flow completed or no-data fallback was triggered."
         );
-        specs.put(
+        addSpec(
+            specs,
             "UiSideMenuNavigationTest#shouldUseSideMenuToNavigateSections",
-            new TestCaseSpec(
-                "Positive",
-                "Side menu should navigate to /profile and back to /books.",
-                "Observed side menu navigation to /profile then back to /books."
-            )
+            "UI - Navigate Sections From Side Menu",
+            "UI",
+            "Positive",
+            "Side menu should navigate to /profile and back to /books.",
+            "Observed side menu navigation to /profile then back to /books."
         );
 
         return specs;
@@ -244,11 +373,15 @@ public class App {
     }
 
     private static final class TestCaseSpec {
+        private final String displayName;
+        private final String area;
         private final String type;
         private final String expected;
         private final String actualOnPass;
 
-        private TestCaseSpec(String type, String expected, String actualOnPass) {
+        private TestCaseSpec(String displayName, String area, String type, String expected, String actualOnPass) {
+            this.displayName = displayName;
+            this.area = area;
             this.type = type;
             this.expected = expected;
             this.actualOnPass = actualOnPass;
